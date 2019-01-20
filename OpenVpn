@@ -1,2 +1,217 @@
 https://blog.rj-bai.com/post/132.html#menu_index_11
 https://blog.rj-bai.com/post/136.html
+OPENVPN基本介绍
+
+一、OpenVPN基本介绍
+
+OpenVPN使用客户端 - 服务器连接来提供客户端和Internet之间的安全通信。服务器端直接连接到互联网，客户端与服务器连接，最终间接连接到互联网。在互联网上，客户端显示为服务器本身，它使用服务器的物理位置和其他属性，这意味着客户端的身份完全隐藏。
+
+二、OpenVPN的原理
+ 
+
+OpenVPN将服务端上的tun与计算机客户端上的tun连接的机制是：它只是在服务端和客户端之间通过互联网创建加密的UDP连接，并在服务端上的tun之间转发流量。由于设计了tun和tap驱动程序的巧妙方式，完全在用户空间中运行的程序可以实现此链接，从而允许OpenVPN成为可移植的跨平台守护程序（像SSH），而不是特定于操作系统的内核模块（如IPSec）。
+tun驱动是虚拟IP点对点设备，tap驱动是虚拟以太网设备。用 “长电缆”类比，使用tun设备就像使用T1电缆连接计算机并使用分接设备就像拥有连接两台计算机的以太网网络一样。而如果要运行需要以太网特殊功能的应用程序（不能在纯IP网络上运行）的人通常会使用tap驱动，将虚拟以太网桥接其物理本地以太网，然后VPN将设备链接到另一端。
+客户端根据ovpn配置文件设置启动客户端软件，然后发送请求给服务端，服务端相应后，开始证书身份验证，客户端将ovpn配置中的证书信息发给服务端，服务端验证通过后，根据自己的DHCP的IP池分配一个IP发给客户端，并修改客户端的路由表，如果服务端设置了所有流通过VPN，那么就修改默认路由，如果只是私有网段的包过VPN，那么就添加一条路由转发的设置，这样就算是完成了OpenVPN的连接。
+当客户端连接内网机器的时候，会根据路由表把包发给服务端，服务端会修改包的源地址改为自己的IP，再发给内网机器，举个例子，当客户端访问192.168.1.1，那么数据包会发给服务端，服务端修改包的原地址改为自己的192.168.1.253，然后发给内网机器1，内网机器收到处理后，会以192.168.1.253为目标地址发包，而服务端收到包后再修改包的目的地址发还给客户端。
+
+三、安全机制
+OpenVPN使用OpenSSL进行VPN加密和认证过程，它可以使用UDP和TCP进行传输。而且OpenVPN可以通过HTTP和NAT工作，并可以通过防火墙。
+OpenVPN支持三种身份验证方式：
+1. 预享私钥：最为简单，但它也只能用于创建点对点的VPN。
+2. 第三方证书：由其他证书系统提供认证，我们采用的是easy-rsa。
+3. 用户名和密码组合：可以省略掉客户端证书但同样需要服务端证书用作加密。
+
+四、优点与缺陷
+  优点：
+1. OpenVPN是开源的，这意味着它已被不同的人和组织进行多次彻底审查和测试。
+2. 它可以利用多种加密技术和算法。
+3. 它可以通过防火墙，比较稳定。
+4. OpenVPN具有高度安全性，可根据应用进行配置。
+缺点：
+ 1. OpenVPN高度依赖于第三方软件和应用程序。
+2. 它需要专业的技术知识来配置它，不够友好。
+3. OpenVPN对移动平台的支持不够成熟。
+
+五、 服务端安装过程
+1. 添加源
+mv /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.backup
+wget -O /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-7.repo
+mv /etc/yum.repos.d/epel.repo /etc/yum.repos.d/epel.repo.backup
+mv /etc/yum.repos.d/epel-testing.repo /etc/yum.repos.d/epel-testing.repo.backup
+wget -O /etc/yum.repos.d/epel.repo http://mirrors.aliyun.com/repo/epel-7.repo
+ 
+2. 安装OpenVPN
+yum -y install openvpn easy-rsa      # 配置easy-rsa-3.0
+cp -r /usr/share/easy-rsa/ /etc/openvpn/easy-rsa
+cd /etc/openvpn/easy-rsa/
+\rm 3 3.0
+cd 3.0.3/
+find / -type f -name "vars.example" | xargs -i cp {} . && mv vars.example vars
+ 
+3. 创建一个新的PKI和CA
+./easyrsa init-pki
+./easyrsa build-ca nopass
+
+4. 创建服务端证书
+ ./easyrsa gen-req server nopass   #签约服务端证书
+ ./easyrsa sign server server
+# 确认输入：yes
+./easyrsa gen-dh#创建Diffie-Hellman
+
+5. 创建客户端证书
+复制文件
+cp -r /usr/share/easy-rsa/ /etc/openvpn/client/easy-rsa
+cd /etc/openvpn/client/easy-rsa/
+\rm 3 3.0
+cd 3.0.3/
+find / -type f -name "vars.example" | xargs -i cp {} . && mv vars.example vars
+ 
+./easyrsa init-pki    #生成证书
+./easyrsa gen-req hzw nopass   #客户端证书名为hzw，没有密码 
+cd /etc/openvpn/easy-rsa/3.0.3/
+./easyrsa import-req /etc/openvpn/client/easy-rsa/3.0.3/pki/reqs/hzw.req hzw  #签约客户端证书
+./easyrsa sign client hzw
+确认输入：yes
+
+6. 整理证书
+服务端证书
+mkdir /etc/openvpn/certs
+cd /etc/openvpn/certs/
+cp /etc/openvpn/easy-rsa/3.0.3/pki/dh.pem .
+cp /etc/openvpn/easy-rsa/3.0.3/pki/ca.crt .
+cp /etc/openvpn/easy-rsa/3.0.3/pki/issued/server.crt .
+cp /etc/openvpn/easy-rsa/3.0.3/pki/private/server.key .
+ 
+7. 服务器配置文件
+vim /etc/openvpn/server.conf
+编辑文件内容：
+
+local 172.16.0.242							#服务器ip
+port 1194									#端口
+proto udp								#使用协议
+dev tun									#使用模式
+
+ca /etc/openvpn/certs/ca.crt
+cert /etc/openvpn/certs/server.crt
+key /etc/openvpn/certs/server.key
+dh /etc/openvpn/certs/dh.pem				#指定证书位置
+
+ifconfig-pool-persist /etc/openvpn/ipp.txt		#存放每个人的使用ip
+
+server 192.168.4.0 255.255.255.0				#客户端DHCP
+push "route 172.16.0.0 255.255.255.0"			#VPN访问的网段
+push "redirect-gateway def1 bypass-dchp"		#所有流量都走VPN，不需要可注释掉
+push "dhcp-option DNS 114.114.114.114"
+push "dhcp-option DNS 8.8.8.8"				#DNS1与DNS2
+client-to-client								#允许客户端互通
+
+keepalive 20 120							#保持连接时间
+comp-lzo									#开启VPN压缩
+
+user work								#运行用户
+group work								#运行组
+
+persist-key
+persist-tun
+status openvpn-status.log
+log-append openvpn.log
+verb 1									#日志级别0-9，级别越高，记录越多
+mute 20
+8. 启动VPN，查看状态。
+systemctl start openvpn@server
+Systemctl enable openvpn@server
+
+9.使用Firewalld进行转发
+firewall-cmd --zone=trusted --add-service openvpn
+firewall-cmd --zone=trusted --add-service openvpn --permanent
+firewall-cmd --list-services --zone=trusted
+
+
+firewall-cmd --add-masquerade
+firewall-cmd --permanent --add-masquerade
+firewall-cmd --query-masquerade
+
+SHARK=$(ip route get 8.8.8.8 | awk 'NR==1 {print $(NF-2)}')
+firewall-cmd --permanent --direct --passthrough ipv4 -t nat -A POSTROUTING -s 10.8.0.0/24 -o $SHARK -j MASQUERADE
+echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
+sysctl -p				#路由转发
+至此，服务端配置完成。下面是客户端的一些配置脚本
+
+1) 创建用户脚本：
+user=$1
+
+if [[ /etc/openvpn/client/easy-rsa/3.0.3/pki/private/${user}.key -f ]]
+  echo this user $user is created ,please use bash /work/sh/openvpn/update_ssl.sh $user
+  exit 1
+fi
+
+cd /etc/openvpn/client/easy-rsa/3.0.3/
+expect <<EOF
+spawn ./easyrsa gen-req $user nopass
+expect server {send \n}
+expect server {send \n}
+EOF
+cd /etc/openvpn/easy-rsa/3.0.3/
+./easyrsa import-req /etc/openvpn/client/easy-rsa/3.0.3/pki/reqs/${user}.req $user
+expect <<EOF
+spawn ./easyrsa sign client $user
+expect details: {send yes\n}
+expect details: {send yes\n}
+EOF
+
+mkdir /etc/openvpn/client/$user
+cp /etc/openvpn/easy-rsa/3.0.3/pki/ca.crt /etc/openvpn/client/$user/
+cp /etc/openvpn/easy-rsa/3.0.3/pki/issued/${user}.crt /etc/openvpn/client/$user/
+cp /etc/openvpn/client/easy-rsa/3.0.3/pki/private/${user}.key /etc/openvpn/client/$user/
+cp /etc/openvpn/client/easy-rsa/3.0.3/client.ovpn /etc/openvpn/client/$user/
+sed -i 's/NAME/'$user'/' /etc/openvpn/client/$user/client.ovpn
+
+cd /etc/openvpn/client/$user/
+tar -zcf ${user}.tar.gz .
+
+2) 注销用户脚本：
+user=$1
+
+cd /etc/openvpn/easy-rsa/3.0.3
+expect << EOF
+spawn ./easyrsa revoke $user
+expect revocation {send yes\n}
+expect revocation {send yes\n}
+EOF
+
+./easyrsa gen-crl
+
+while [[ $(grep crl /etc/openvpn/server.conf) == '' ]]
+do
+   sed -i '/dh/acrl-verify\ \/etc\/openvpn\/easy-rsa\/3.0.3\/pki\/crl.pem' /etc/openvpn/server.conf
+done
+
+rm -rf /etc/openvpn/client/$user/
+rm -f /etc/openvpn/easy-rsa/3.0.3/pki/reqs/${user}.req
+rm -f /etc/openvpn/client/easy-rsa/3.0.3/pki/private/${user}.key
+
+systemctl restart openvpn@server
+
+3) 添加用户脚本：
+cd /etc/openvpn/client/easy-rsa/3.0.3/
+expect <<EOF
+spawn ./easyrsa gen-req $user nopass
+expect overwrite {send yes\n}
+expect server {send \n}
+expect server {send \n}
+EOF
+cd /etc/openvpn/easy-rsa/3.0.3/
+./easyrsa import-req /etc/openvpn/client/easy-rsa/3.0.3/pki/reqs/${user}.req $user
+expect <<EOF
+spawn ./easyrsa sign client $user
+expect details: {send yes\n}
+expect details: {send yes\n}
+EOF
+
+mkdir /etc/openvpn/client/$user/
+cp /etc/openvpn/easy-rsa/3.0.3/pki/ca.crt /etc/openvpn/client/$user/
+cp /etc/openvpn/easy-rsa/3.0.3/pki/issued/${user}.crt /etc/openvpn/client/$user/
+cp /etc/openvpn/client/easy-rsa/3.0.3/pki/private/${user}.key /etc/openvpn/client/$user/
+
+cd /etc/openvpn/client/$user/
+tar -zcf ${user}.tar.gz .

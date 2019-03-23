@@ -137,10 +137,32 @@ echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
 sysctl -p				#路由转发
 至此，服务端配置完成。下面是客户端的一些配置脚本
 
+0) 模板配置：/etc/openvpn/client/easy-rsa/3.0.3/client.ovpn
+
+client
+proto udp
+dev tun
+remote 106.75.132.155 1194
+
+ca ca.crt
+cert NAME.crt
+key NAME.key
+
+resolv-retry infinite
+nobind
+mute-replay-warnings
+
+keepalive 20 120
+comp-lzo
+
+verb 3
+mute 20
+
+
 1) 创建用户脚本：
 user=$1
 
-if [[ /etc/openvpn/client/easy-rsa/3.0.3/pki/private/${user}.key -f ]]
+if [[ -f /etc/openvpn/client/easy-rsa/3.0.3/pki/private/${user}.key  ]];then
   echo this user $user is created ,please use bash /work/sh/openvpn/update_ssl.sh $user
   exit 1
 fi
